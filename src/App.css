@@ -32,12 +32,13 @@
 }
 
 .field-narrow {
-  flex: 0 1 110px;
-  min-width: 110px;
+  flex: 0 1 170px;
+  min-width: 170px;
 }
 
 .field-narrow input {
-  width: 60px;
+  width: 80px;
+  flex: 0 0 80px;
 }
 
 .field-label {
