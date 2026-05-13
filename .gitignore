@@ -22,3 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+__pycache__/
+*.py[cod]
+.venv
+api-venv
+*.egg-info
+
+# Vercel
+.vercel
+
