@@ -5,6 +5,13 @@ export const DAILY_MS = 24 * 60 * 60 * 1000;
 /** Weekly quota refresh period in ms. */
 export const WEEKLY_MS = 7 * DAILY_MS;
 
+/**
+ * Quota reset schedule: daily at 15:00 NSK (UTC+7), weekly on Sundays at the
+ * same time. NSK has no DST so the offset is constant.
+ */
+const NSK_OFFSET_MS = 7 * 60 * 60 * 1000;
+const RESET_HOUR_NSK = 15;
+
 /** Format an ISO datetime as "MM-DD HH:mm". */
 export function formatShort(iso: string): string {
   const d = new Date(iso);
@@ -63,24 +70,95 @@ export function daysLeft(targetIso: string, now: Date = new Date()): number {
   return Math.ceil(diff / DAILY_MS);
 }
 
+/** UTC ms of today's 15:00 NSK boundary, regardless of whether it's past or future. */
+function todayDailyBoundaryMs(now: Date): number {
+  const nskMs = now.getTime() + NSK_OFFSET_MS;
+  const nsk = new Date(nskMs);
+  // Build today's 15:00 NSK as if it were UTC...
+  const todayResetNskMs = Date.UTC(
+    nsk.getUTCFullYear(),
+    nsk.getUTCMonth(),
+    nsk.getUTCDate(),
+    RESET_HOUR_NSK,
+    0,
+    0
+  );
+  // ...and convert back to the corresponding UTC moment.
+  return todayResetNskMs - NSK_OFFSET_MS;
+}
+
+/** Most recent UTC ms that mapped to 15:00 NSK (≤ now). */
+export function lastDailyBoundaryMs(now: Date = new Date()): number {
+  const today = todayDailyBoundaryMs(now);
+  return today <= now.getTime() ? today : today - DAILY_MS;
+}
+
+/** Next UTC ms that maps to 15:00 NSK (> now). */
+export function nextDailyBoundaryMs(now: Date = new Date()): number {
+  const today = todayDailyBoundaryMs(now);
+  return today > now.getTime() ? today : today + DAILY_MS;
+}
+
+/** Most recent UTC ms that mapped to Sunday 15:00 NSK (≤ now). */
+export function lastWeeklyBoundaryMs(now: Date = new Date()): number {
+  return nextWeeklyBoundaryMs(now) - WEEKLY_MS;
+}
+
+/** Next UTC ms that maps to Sunday 15:00 NSK (> now). */
+export function nextWeeklyBoundaryMs(now: Date = new Date()): number {
+  const nskMs = now.getTime() + NSK_OFFSET_MS;
+  const nsk = new Date(nskMs);
+  const todayResetNskMs = Date.UTC(
+    nsk.getUTCFullYear(),
+    nsk.getUTCMonth(),
+    nsk.getUTCDate(),
+    RESET_HOUR_NSK,
+    0,
+    0
+  );
+  // getUTCDay(): 0 = Sunday. We want next Sunday.
+  const nskDow = nsk.getUTCDay();
+  const daysToAdd = (7 - nskDow) % 7;
+  let candidateNskMs = todayResetNskMs + daysToAdd * DAILY_MS;
+  if (candidateNskMs <= nskMs) candidateNskMs += WEEKLY_MS;
+  return candidateNskMs - NSK_OFFSET_MS;
+}
+
 /**
- * Roll a quota reset timestamp forward by `periodMs` until it is strictly in
- * the future. Returns the new reset time and the number of resets that
- * happened. If at least one reset happened, the percent should be set to 100.
+ * Format a positive duration as a short Russian "Сброс через …" string.
+ * Picks the right unit by magnitude (days vs hours vs minutes).
  */
-export function advanceReset(
-  resetIso: string,
-  periodMs: number,
-  now: Date = new Date()
-): { resetAt: string; reset: boolean } {
-  const reset = new Date(resetIso).getTime();
-  if (Number.isNaN(reset)) return { resetAt: resetIso, reset: false };
-  if (reset > now.getTime()) {
-    return { resetAt: resetIso, reset: false };
+export function formatResetIn(targetMs: number, now: Date = new Date()): string {
+  const diff = targetMs - now.getTime();
+  if (diff <= 0) return "обновляется…";
+
+  const totalMinutes = Math.floor(diff / (60 * 1000));
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days >= 1) {
+    return `Сброс через ${days} ${dayWord(days)}`;
   }
-  let next = reset;
-  while (next <= now.getTime()) {
-    next += periodMs;
+  if (hours >= 1) {
+    return `Сброс через ${hours} ч ${String(minutes).padStart(2, "0")} мин`;
   }
-  return { resetAt: new Date(next).toISOString(), reset: true };
+  return `Сброс через ${minutes} мин`;
+}
+
+function dayWord(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 14) return "дн.";
+  if (mod10 === 1) return "день";
+  if (mod10 >= 2 && mod10 <= 4) return "дня";
+  return "дн.";
+}
+
+/** Compute the bar fill colour: green at 0%, yellow at 50%, red at 100%. */
+export function quotaColor(percent: number): string {
+  const clamped = Math.max(0, Math.min(100, percent));
+  // hsl 120 (green) -> 0 (red), linear in percent.
+  const hue = 120 - clamped * 1.2;
+  return `hsl(${hue.toFixed(0)} 70% 45%)`;
 }

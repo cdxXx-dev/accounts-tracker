@@ -13,9 +13,9 @@ type ServerAccount = {
   id: string;
   email: string;
   registered_at: string;
-  daily_reset_at: string;
+  daily_last_reset_at: string;
   daily_percent: number;
-  weekly_reset_at: string;
+  weekly_last_reset_at: string;
   weekly_percent: number;
   created_at: string;
   updated_at: string;
@@ -26,9 +26,9 @@ function toAccount(s: ServerAccount): Account {
     id: s.id,
     email: s.email,
     registeredAt: s.registered_at,
-    dailyResetAt: s.daily_reset_at,
+    dailyLastResetAt: s.daily_last_reset_at,
     dailyPercent: s.daily_percent,
-    weeklyResetAt: s.weekly_reset_at,
+    weeklyLastResetAt: s.weekly_last_reset_at,
     weeklyPercent: s.weekly_percent,
     createdAt: s.created_at,
   };
@@ -38,12 +38,20 @@ function toServerPayload(input: AccountInput) {
   return {
     email: input.email,
     registered_at: input.registeredAt,
-    daily_reset_at: input.dailyResetAt,
     daily_percent: input.dailyPercent,
-    weekly_reset_at: input.weeklyResetAt,
     weekly_percent: input.weeklyPercent,
   };
 }
+
+/** Patch payload sent to the server. */
+export type AccountPatch = Partial<{
+  email: string;
+  registeredAt: string;
+  dailyLastResetAt: string;
+  dailyPercent: number;
+  weeklyLastResetAt: string;
+  weeklyPercent: number;
+}>;
 
 export class UnauthorizedError extends Error {
   constructor(message = "Unauthorized") {
@@ -118,15 +126,16 @@ export async function createAccount(input: AccountInput): Promise<Account> {
 
 export async function updateAccount(
   id: string,
-  patch: Partial<AccountInput>
+  patch: AccountPatch
 ): Promise<Account> {
   const body: Record<string, unknown> = {};
   if (patch.email !== undefined) body.email = patch.email;
   if (patch.registeredAt !== undefined) body.registered_at = patch.registeredAt;
-  if (patch.dailyResetAt !== undefined) body.daily_reset_at = patch.dailyResetAt;
+  if (patch.dailyLastResetAt !== undefined)
+    body.daily_last_reset_at = patch.dailyLastResetAt;
   if (patch.dailyPercent !== undefined) body.daily_percent = patch.dailyPercent;
-  if (patch.weeklyResetAt !== undefined)
-    body.weekly_reset_at = patch.weeklyResetAt;
+  if (patch.weeklyLastResetAt !== undefined)
+    body.weekly_last_reset_at = patch.weeklyLastResetAt;
   if (patch.weeklyPercent !== undefined)
     body.weekly_percent = patch.weeklyPercent;
 
