@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Iterator
 from uuid import UUID
 
@@ -42,6 +42,44 @@ def get_connection() -> Iterator[psycopg.Connection]:
         conn.close()
 
 
+# Quota reset schedule is fixed: 15:00 Asia/Novosibirsk (UTC+7), i.e. 08:00 UTC.
+# Daily quota resets every day at that time; weekly quota resets on Sundays at
+# that time. The DB stores the *last applied* reset boundary so we know when
+# the next tick should flip the percent back to zero.
+NSK_OFFSET = timedelta(hours=7)
+RESET_HOUR_NSK = 15
+RESET_HOUR_UTC = RESET_HOUR_NSK - int(NSK_OFFSET.total_seconds() // 3600)  # = 8
+
+
+def latest_past_daily_boundary(now: datetime) -> datetime:
+    """Return the most recent UTC moment that maps to 15:00 NSK."""
+    now_utc = now.astimezone(timezone.utc)
+    candidate = now_utc.replace(
+        hour=RESET_HOUR_UTC, minute=0, second=0, microsecond=0
+    )
+    if candidate > now_utc:
+        candidate -= timedelta(days=1)
+    return candidate
+
+
+def latest_past_weekly_boundary(now: datetime) -> datetime:
+    """Return the most recent UTC moment that maps to Sunday 15:00 NSK."""
+    now_utc = now.astimezone(timezone.utc)
+    nsk_now = now_utc + NSK_OFFSET
+    # In NSK terms, weekday(): Mon=0..Sun=6. We want the previous (or current)
+    # Sunday 15:00 NSK.
+    nsk_today_1500 = nsk_now.replace(
+        hour=RESET_HOUR_NSK, minute=0, second=0, microsecond=0
+    )
+    # Days back from today's NSK weekday to the previous Sunday (inclusive).
+    days_back = (nsk_today_1500.weekday() - 6) % 7  # weekday(): Mon=0..Sun=6
+    # If today is Sunday but it's before 15:00 NSK, go back 7 days.
+    candidate_nsk = nsk_today_1500 - timedelta(days=days_back)
+    if candidate_nsk > nsk_now:
+        candidate_nsk -= timedelta(days=7)
+    return (candidate_nsk - NSK_OFFSET).replace(tzinfo=timezone.utc)
+
+
 def ensure_schema() -> None:
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -50,15 +88,38 @@ def ensure_schema() -> None:
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 email TEXT NOT NULL,
                 registered_at TIMESTAMPTZ NOT NULL,
-                daily_reset_at TIMESTAMPTZ NOT NULL,
-                daily_percent INTEGER NOT NULL DEFAULT 100
+                daily_last_reset_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                daily_percent INTEGER NOT NULL DEFAULT 0
                     CHECK (daily_percent BETWEEN 0 AND 100),
-                weekly_reset_at TIMESTAMPTZ NOT NULL,
-                weekly_percent INTEGER NOT NULL DEFAULT 100
+                weekly_last_reset_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                weekly_percent INTEGER NOT NULL DEFAULT 0
                     CHECK (weekly_percent BETWEEN 0 AND 100),
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
+            """
+        )
+        # Migration: rename legacy columns from the previous schema.
+        # daily_reset_at / weekly_reset_at used to hold the *next* user-set
+        # reset time; under the new mechanic we reinterpret them as the
+        # *last* applied boundary, so a simple rename is correct.
+        cur.execute(
+            """
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'accounts' AND column_name = 'daily_reset_at'
+              ) THEN
+                ALTER TABLE accounts RENAME COLUMN daily_reset_at TO daily_last_reset_at;
+              END IF;
+              IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'accounts' AND column_name = 'weekly_reset_at'
+              ) THEN
+                ALTER TABLE accounts RENAME COLUMN weekly_reset_at TO weekly_last_reset_at;
+              END IF;
+            END $$;
             """
         )
 
@@ -66,18 +127,16 @@ def ensure_schema() -> None:
 class AccountIn(BaseModel):
     email: EmailStr
     registered_at: datetime
-    daily_reset_at: datetime
-    daily_percent: int = Field(ge=0, le=100, default=100)
-    weekly_reset_at: datetime
-    weekly_percent: int = Field(ge=0, le=100, default=100)
+    daily_percent: int = Field(ge=0, le=100, default=0)
+    weekly_percent: int = Field(ge=0, le=100, default=0)
 
 
 class AccountPatch(BaseModel):
     email: EmailStr | None = None
     registered_at: datetime | None = None
-    daily_reset_at: datetime | None = None
+    daily_last_reset_at: datetime | None = None
     daily_percent: int | None = Field(default=None, ge=0, le=100)
-    weekly_reset_at: datetime | None = None
+    weekly_last_reset_at: datetime | None = None
     weekly_percent: int | None = Field(default=None, ge=0, le=100)
 
 
@@ -85,9 +144,9 @@ class Account(BaseModel):
     id: UUID
     email: str
     registered_at: datetime
-    daily_reset_at: datetime
+    daily_last_reset_at: datetime
     daily_percent: int
-    weekly_reset_at: datetime
+    weekly_last_reset_at: datetime
     weekly_percent: int
     created_at: datetime
     updated_at: datetime
@@ -136,9 +195,9 @@ _FIELDS = (
     "id",
     "email",
     "registered_at",
-    "daily_reset_at",
+    "daily_last_reset_at",
     "daily_percent",
-    "weekly_reset_at",
+    "weekly_last_reset_at",
     "weekly_percent",
     "created_at",
     "updated_at",
@@ -146,9 +205,9 @@ _FIELDS = (
 _UPDATABLE = (
     "email",
     "registered_at",
-    "daily_reset_at",
+    "daily_last_reset_at",
     "daily_percent",
-    "weekly_reset_at",
+    "weekly_last_reset_at",
     "weekly_percent",
 )
 _SELECT_COLS = ", ".join(_FIELDS)
@@ -186,13 +245,16 @@ def list_accounts() -> list[Account]:
 )
 def create_account(payload: AccountIn) -> Account:
     ensure_schema()
+    now = datetime.now(tz=timezone.utc)
+    daily_anchor = latest_past_daily_boundary(now)
+    weekly_anchor = latest_past_weekly_boundary(now)
     with get_connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             f"""
             INSERT INTO accounts (
                 email, registered_at,
-                daily_reset_at, daily_percent,
-                weekly_reset_at, weekly_percent
+                daily_last_reset_at, daily_percent,
+                weekly_last_reset_at, weekly_percent
             )
             VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING {_SELECT_COLS}
@@ -200,9 +262,9 @@ def create_account(payload: AccountIn) -> Account:
             (
                 payload.email,
                 payload.registered_at,
-                payload.daily_reset_at,
+                daily_anchor,
                 payload.daily_percent,
-                payload.weekly_reset_at,
+                weekly_anchor,
                 payload.weekly_percent,
             ),
         )

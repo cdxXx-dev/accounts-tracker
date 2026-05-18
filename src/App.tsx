@@ -8,41 +8,51 @@ import {
   listAccounts,
   updateAccount,
   UnauthorizedError,
+  type AccountPatch,
 } from "./api";
 import { clearToken, loadToken } from "./auth";
 import type { Account, AccountInput } from "./types";
-import { advanceReset, DAILY_MS, WEEKLY_MS } from "./utils";
+import { lastDailyBoundaryMs, lastWeeklyBoundaryMs } from "./utils";
 import "./App.css";
 
 /**
- * Apply quota auto-reset: when a reset time has passed, set the percent to 100
- * and roll the reset time forward by one period. Returns either the original
- * array (no changes) or a new array with updated accounts and a list of patches
- * to persist on the server.
+ * Apply quota auto-reset: if the most recent past 15:00 NSK boundary is later
+ * than the last applied reset for an account, flip the percent to 0 and bump
+ * the stored boundary. Returns a new array if anything changed and a list of
+ * patches to persist on the server.
  */
 function applyQuotaResets(
   accounts: Account[],
   now: Date
-): { next: Account[]; patches: Array<{ id: string; patch: Partial<AccountInput> }> } {
-  const patches: Array<{ id: string; patch: Partial<AccountInput> }> = [];
+): { next: Account[]; patches: Array<{ id: string; patch: AccountPatch }> } {
+  const patches: Array<{ id: string; patch: AccountPatch }> = [];
+  const lastDailyIso = new Date(lastDailyBoundaryMs(now)).toISOString();
+  const lastWeeklyIso = new Date(lastWeeklyBoundaryMs(now)).toISOString();
+
   let changed = false;
   const next = accounts.map((acc) => {
     let updated = acc;
-    const patch: Partial<AccountInput> = {};
+    const patch: AccountPatch = {};
 
-    const daily = advanceReset(updated.dailyResetAt, DAILY_MS, now);
-    if (daily.reset) {
-      updated = { ...updated, dailyResetAt: daily.resetAt, dailyPercent: 100 };
-      patch.dailyResetAt = daily.resetAt;
-      patch.dailyPercent = 100;
+    if (new Date(acc.dailyLastResetAt).getTime() < lastDailyBoundaryMs(now)) {
+      updated = {
+        ...updated,
+        dailyLastResetAt: lastDailyIso,
+        dailyPercent: 0,
+      };
+      patch.dailyLastResetAt = lastDailyIso;
+      patch.dailyPercent = 0;
       changed = true;
     }
 
-    const weekly = advanceReset(updated.weeklyResetAt, WEEKLY_MS, now);
-    if (weekly.reset) {
-      updated = { ...updated, weeklyResetAt: weekly.resetAt, weeklyPercent: 100 };
-      patch.weeklyResetAt = weekly.resetAt;
-      patch.weeklyPercent = 100;
+    if (new Date(acc.weeklyLastResetAt).getTime() < lastWeeklyBoundaryMs(now)) {
+      updated = {
+        ...updated,
+        weeklyLastResetAt: lastWeeklyIso,
+        weeklyPercent: 0,
+      };
+      patch.weeklyLastResetAt = lastWeeklyIso;
+      patch.weeklyPercent = 0;
       changed = true;
     }
 
@@ -128,7 +138,7 @@ export default function App() {
   );
 
   const handleUpdate = useCallback(
-    async (id: string, patch: AccountInput) => {
+    async (id: string, patch: AccountPatch) => {
       setError(null);
       try {
         const updated = await updateAccount(id, patch);

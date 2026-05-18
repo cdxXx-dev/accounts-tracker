@@ -90,6 +90,13 @@
   text-align: center;
 }
 
+.form-hint {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  font-style: italic;
+}
+
 .cards-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
@@ -194,16 +201,15 @@
 
 .quota-bar {
   height: 6px;
-  background: var(--green-bar-bg);
+  background: var(--bar-bg);
   border-radius: 999px;
   overflow: hidden;
 }
 
 .quota-fill {
   height: 100%;
-  background: var(--green);
   border-radius: 999px;
-  transition: width 0.3s ease;
+  transition: width 0.3s ease, background 0.3s ease;
 }
 
 .quota-pct {
@@ -213,9 +219,14 @@
   text-align: right;
 }
 
-.quota-time {
-  color: var(--muted);
-  font-size: 12px;
+.reset-badge {
+  padding: 3px 8px;
+  background: var(--reset-badge-bg);
+  color: var(--reset-badge-text);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
