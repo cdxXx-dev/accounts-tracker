@@ -125,8 +125,9 @@ export function nextWeeklyBoundaryMs(now: Date = new Date()): number {
 }
 
 /**
- * Format a positive duration as a short Russian "Сброс через …" string.
- * Picks the right unit by magnitude (days vs hours vs minutes).
+ * Format a positive duration as a short Russian countdown string —
+ * just the remaining amount (e.g. "21 ч 23 мин", "6 дней"). Picks the
+ * right unit by magnitude.
  */
 export function formatResetIn(targetMs: number, now: Date = new Date()): string {
   const diff = targetMs - now.getTime();
@@ -138,21 +139,21 @@ export function formatResetIn(targetMs: number, now: Date = new Date()): string 
   const minutes = totalMinutes % 60;
 
   if (days >= 1) {
-    return `Сброс через ${days} ${dayWord(days)}`;
+    return `${days} ${dayWord(days)}`;
   }
   if (hours >= 1) {
-    return `Сброс через ${hours} ч ${String(minutes).padStart(2, "0")} мин`;
+    return `${hours} ч ${String(minutes).padStart(2, "0")} мин`;
   }
-  return `Сброс через ${minutes} мин`;
+  return `${minutes} мин`;
 }
 
 function dayWord(n: number): string {
   const mod10 = n % 10;
   const mod100 = n % 100;
-  if (mod100 >= 11 && mod100 <= 14) return "дн.";
+  if (mod100 >= 11 && mod100 <= 14) return "дней";
   if (mod10 === 1) return "день";
   if (mod10 >= 2 && mod10 <= 4) return "дня";
-  return "дн.";
+  return "дней";
 }
 
 /** Compute the bar fill colour: green at 0%, yellow at 50%, red at 100%. */

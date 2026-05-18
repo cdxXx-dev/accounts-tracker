@@ -16,43 +16,53 @@ import { lastDailyBoundaryMs, lastWeeklyBoundaryMs } from "./utils";
 import "./App.css";
 
 /**
- * Apply quota auto-reset: if the most recent past 15:00 NSK boundary is later
- * than the last applied reset for an account, flip the percent to 0 and bump
- * the stored boundary. Returns a new array if anything changed and a list of
- * patches to persist on the server.
+ * Apply quota auto-reset: whenever the stored "last applied boundary" doesn't
+ * match the latest past 15:00 NSK boundary, snap it back into shape. This
+ * covers both the normal next-day case (stored < latest) and the legacy
+ * post-migration case where stored holds an old user-set "next reset" value
+ * in the future (stored > latest). Returns a new array if anything changed
+ * and a list of patches to persist on the server.
  */
 function applyQuotaResets(
   accounts: Account[],
   now: Date
 ): { next: Account[]; patches: Array<{ id: string; patch: AccountPatch }> } {
   const patches: Array<{ id: string; patch: AccountPatch }> = [];
-  const lastDailyIso = new Date(lastDailyBoundaryMs(now)).toISOString();
-  const lastWeeklyIso = new Date(lastWeeklyBoundaryMs(now)).toISOString();
+  const latestDailyMs = lastDailyBoundaryMs(now);
+  const latestWeeklyMs = lastWeeklyBoundaryMs(now);
+  const lastDailyIso = new Date(latestDailyMs).toISOString();
+  const lastWeeklyIso = new Date(latestWeeklyMs).toISOString();
 
   let changed = false;
   const next = accounts.map((acc) => {
     let updated = acc;
     const patch: AccountPatch = {};
 
-    if (new Date(acc.dailyLastResetAt).getTime() < lastDailyBoundaryMs(now)) {
-      updated = {
-        ...updated,
-        dailyLastResetAt: lastDailyIso,
-        dailyPercent: 0,
-      };
+    const storedDailyMs = new Date(acc.dailyLastResetAt).getTime();
+    if (
+      Number.isNaN(storedDailyMs) ||
+      storedDailyMs !== latestDailyMs
+    ) {
+      updated = { ...updated, dailyLastResetAt: lastDailyIso };
       patch.dailyLastResetAt = lastDailyIso;
-      patch.dailyPercent = 0;
+      if (acc.dailyPercent > 0) {
+        updated = { ...updated, dailyPercent: 0 };
+        patch.dailyPercent = 0;
+      }
       changed = true;
     }
 
-    if (new Date(acc.weeklyLastResetAt).getTime() < lastWeeklyBoundaryMs(now)) {
-      updated = {
-        ...updated,
-        weeklyLastResetAt: lastWeeklyIso,
-        weeklyPercent: 0,
-      };
+    const storedWeeklyMs = new Date(acc.weeklyLastResetAt).getTime();
+    if (
+      Number.isNaN(storedWeeklyMs) ||
+      storedWeeklyMs !== latestWeeklyMs
+    ) {
+      updated = { ...updated, weeklyLastResetAt: lastWeeklyIso };
       patch.weeklyLastResetAt = lastWeeklyIso;
-      patch.weeklyPercent = 0;
+      if (acc.weeklyPercent > 0) {
+        updated = { ...updated, weeklyPercent: 0 };
+        patch.weeklyPercent = 0;
+      }
       changed = true;
     }
 
