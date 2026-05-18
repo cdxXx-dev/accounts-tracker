@@ -4,15 +4,21 @@ import {
   daysLeft,
   expiryFromRegistered,
   formatLong,
-  formatShort,
+  formatResetIn,
   isoToLocalInput,
   localInputToIso,
+  nextDailyBoundaryMs,
+  nextWeeklyBoundaryMs,
+  quotaColor,
 } from "../utils";
+
+/** Subset of AccountPatch we let the inline edit form modify. */
+type EditPatch = AccountInput;
 
 type Props = {
   account: Account;
   now: Date;
-  onUpdate: (id: string, patch: AccountInput) => void;
+  onUpdate: (id: string, patch: EditPatch) => void;
   onDelete: (id: string) => void;
 };
 
@@ -21,6 +27,8 @@ export function AccountCard({ account, now, onUpdate, onDelete }: Props) {
 
   const expiresAt = expiryFromRegistered(account.registeredAt);
   const remaining = daysLeft(expiresAt, now);
+  const dailyResetIn = formatResetIn(nextDailyBoundaryMs(now), now);
+  const weeklyResetIn = formatResetIn(nextWeeklyBoundaryMs(now), now);
 
   if (editing) {
     return (
@@ -72,11 +80,14 @@ export function AccountCard({ account, now, onUpdate, onDelete }: Props) {
         <div className="quota-bar">
           <div
             className="quota-fill"
-            style={{ width: `${account.dailyPercent}%` }}
+            style={{
+              width: `${account.dailyPercent}%`,
+              background: quotaColor(account.dailyPercent),
+            }}
           />
         </div>
         <span className="quota-pct">{account.dailyPercent}%</span>
-        <span className="quota-time">{formatShort(account.dailyResetAt)}</span>
+        <span className="reset-badge">{dailyResetIn}</span>
       </div>
 
       <div className="quota-row">
@@ -84,11 +95,14 @@ export function AccountCard({ account, now, onUpdate, onDelete }: Props) {
         <div className="quota-bar">
           <div
             className="quota-fill"
-            style={{ width: `${account.weeklyPercent}%` }}
+            style={{
+              width: `${account.weeklyPercent}%`,
+              background: quotaColor(account.weeklyPercent),
+            }}
           />
         </div>
         <span className="quota-pct">{account.weeklyPercent}%</span>
-        <span className="quota-time">{formatShort(account.weeklyResetAt)}</span>
+        <span className="reset-badge">{weeklyResetIn}</span>
       </div>
 
       <div className="card-footer">
@@ -115,13 +129,7 @@ function AccountCardEdit({ account, onSave, onCancel }: EditProps) {
   const [registered, setRegistered] = useState(
     isoToLocalInput(account.registeredAt)
   );
-  const [dailyReset, setDailyReset] = useState(
-    isoToLocalInput(account.dailyResetAt)
-  );
   const [dailyPercent, setDailyPercent] = useState(String(account.dailyPercent));
-  const [weeklyReset, setWeeklyReset] = useState(
-    isoToLocalInput(account.weeklyResetAt)
-  );
   const [weeklyPercent, setWeeklyPercent] = useState(
     String(account.weeklyPercent)
   );
@@ -138,8 +146,6 @@ function AccountCardEdit({ account, onSave, onCancel }: EditProps) {
     const trimmed = email.trim();
     if (!trimmed) return setError("Почта не может быть пустой");
     if (!registered) return setError("Укажите дату регистрации");
-    if (!dailyReset) return setError("Укажите дневное обновление");
-    if (!weeklyReset) return setError("Укажите недельное обновление");
     const dp = clampPercent(dailyPercent);
     const wp = clampPercent(weeklyPercent);
     if (dp === null || wp === null)
@@ -148,9 +154,7 @@ function AccountCardEdit({ account, onSave, onCancel }: EditProps) {
     onSave({
       email: trimmed,
       registeredAt: localInputToIso(registered),
-      dailyResetAt: localInputToIso(dailyReset),
       dailyPercent: dp,
-      weeklyResetAt: localInputToIso(weeklyReset),
       weeklyPercent: wp,
     });
   }
@@ -197,15 +201,6 @@ function AccountCardEdit({ account, onSave, onCancel }: EditProps) {
       </label>
 
       <label className="edit-field">
-        <span>дневная квота обновится</span>
-        <input
-          type="datetime-local"
-          value={dailyReset}
-          onChange={(e) => setDailyReset(e.target.value)}
-        />
-      </label>
-
-      <label className="edit-field">
         <span>дневной %</span>
         <input
           type="number"
@@ -214,15 +209,6 @@ function AccountCardEdit({ account, onSave, onCancel }: EditProps) {
           step={1}
           value={dailyPercent}
           onChange={(e) => setDailyPercent(e.target.value)}
-        />
-      </label>
-
-      <label className="edit-field">
-        <span>недельная квота обновится</span>
-        <input
-          type="datetime-local"
-          value={weeklyReset}
-          onChange={(e) => setWeeklyReset(e.target.value)}
         />
       </label>
 

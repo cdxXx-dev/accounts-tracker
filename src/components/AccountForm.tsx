@@ -9,10 +9,8 @@ type Props = {
 const initialState = {
   email: "",
   registered: "",
-  dailyReset: "",
-  dailyPercent: "100",
-  weeklyReset: "",
-  weeklyPercent: "100",
+  dailyPercent: "0",
+  weeklyPercent: "0",
 };
 
 function parsePercent(raw: string): number | null {
@@ -38,8 +36,6 @@ export function AccountForm({ onAdd }: Props) {
     const email = state.email.trim();
     if (!email) return setError("Введите почту");
     if (!state.registered) return setError("Укажите дату регистрации");
-    if (!state.dailyReset) return setError("Укажите время обновления дневной квоты");
-    if (!state.weeklyReset) return setError("Укажите время обновления недельной квоты");
 
     const dailyPercent = parsePercent(state.dailyPercent);
     const weeklyPercent = parsePercent(state.weeklyPercent);
@@ -49,9 +45,7 @@ export function AccountForm({ onAdd }: Props) {
     onAdd({
       email,
       registeredAt: localInputToIso(state.registered),
-      dailyResetAt: localInputToIso(state.dailyReset),
       dailyPercent,
-      weeklyResetAt: localInputToIso(state.weeklyReset),
       weeklyPercent,
     });
 
@@ -83,15 +77,6 @@ export function AccountForm({ onAdd }: Props) {
       </div>
 
       <div className="form-row">
-        <label className="field">
-          <span className="field-label">дневная квота</span>
-          <input
-            type="datetime-local"
-            value={state.dailyReset}
-            onChange={(e) => update("dailyReset", e.target.value)}
-          />
-        </label>
-
         <label className="field field-narrow">
           <span className="field-label">дневной %</span>
           <input
@@ -101,15 +86,6 @@ export function AccountForm({ onAdd }: Props) {
             step={1}
             value={state.dailyPercent}
             onChange={(e) => update("dailyPercent", e.target.value)}
-          />
-        </label>
-
-        <label className="field">
-          <span className="field-label">недельная квота</span>
-          <input
-            type="datetime-local"
-            value={state.weeklyReset}
-            onChange={(e) => update("weeklyReset", e.target.value)}
           />
         </label>
 
@@ -124,6 +100,11 @@ export function AccountForm({ onAdd }: Props) {
             onChange={(e) => update("weeklyPercent", e.target.value)}
           />
         </label>
+      </div>
+
+      <div className="form-hint">
+        Квоты сбрасываются автоматически: дневная — каждый день в 15:00 по
+        Новосибирску, недельная — каждое воскресенье в 15:00 по Новосибирску.
       </div>
 
       <div className="form-actions">
