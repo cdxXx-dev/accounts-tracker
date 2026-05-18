@@ -69,6 +69,41 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * FastAPI returns `detail` as a string for HTTPException but as an array of
+ * validation-error objects (e.g. `[{type, loc, msg, input, ctx}]`) for
+ * Pydantic validation failures. Normalize both to a single readable string
+ * so we don't render "[object Object]" in the UI.
+ */
+function formatDetail(detail: unknown): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (!item || typeof item !== "object") return String(item);
+        const obj = item as { loc?: unknown; msg?: unknown };
+        const field = Array.isArray(obj.loc)
+          ? obj.loc
+              .filter((p) => p !== "body" && p !== "query" && p !== "path")
+              .join(".")
+          : "";
+        const msg = typeof obj.msg === "string" ? obj.msg : JSON.stringify(item);
+        return field ? `${field}: ${msg}` : msg;
+      })
+      .filter(Boolean);
+    if (parts.length > 0) return parts.join("; ");
+  }
+  if (detail && typeof detail === "object") {
+    const obj = detail as { msg?: unknown };
+    if (typeof obj.msg === "string") return obj.msg;
+  }
+  try {
+    return JSON.stringify(detail);
+  } catch {
+    return String(detail);
+  }
+}
+
 async function request(
   path: string,
   init: RequestInit & { token?: string } = {}
@@ -94,8 +129,8 @@ async function request(
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try {
-      const data = (await res.json()) as { detail?: string };
-      if (data?.detail) detail = data.detail;
+      const data = (await res.json()) as { detail?: unknown };
+      if (data?.detail) detail = formatDetail(data.detail);
     } catch {
       // ignore JSON parse failure
     }
